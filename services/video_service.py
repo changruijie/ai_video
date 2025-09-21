@@ -1,25 +1,10 @@
-"""
-    视频合成
-"""
-class VideoService:
-    def __init__(self, file_manager: FileManager):
-        self.file_manager = file_manager
+import os
+from moviepy.editor import ImageClip, concatenate_videoclips
+from utils.file_manager import ensure_dir
 
-
-    def compose_video(self, task_id: int, shots: List[Shot], audio_path: Optional[Path], fps: int = 1) -> Path:
-        image_paths = [str(s.image_path) for s in shots if s.image_path]
-        out = self.file_manager.task_dir(task_id) / 'result.mp4'
-        logger.info('VideoService.compose_video -> %s, images=%d', out, len(image_paths))
-        try:
-            clip = ImageSequenceClip(image_paths, fps=fps)
-            if audio_path and audio_path.exists() and audio_path.stat().st_size > 0:
-                audio = AudioFileClip(str(audio_path))
-                clip = clip.set_audio(audio)
-            clip.write_videofile(str(out), codec='libx264', audio_codec='aac')
-            clip.close()
-            if audio_path and audio_path.exists():
-                audio.close()
-        except Exception as e:
-            logger.exception('Video composition failed: %s', e)
-            raise
-        return out
+def stitch_images_to_video(image_paths: list[str], out_path: str, fps: int = 24, dur: float = 1.5) -> str:
+    ensure_dir(os.path.dirname(out_path))
+    clips = [ImageClip(p).set_duration(dur) for p in image_paths]
+    video = concatenate_videoclips(clips, method="compose")
+    video.write_videofile(out_path, fps=fps)
+    return out_path

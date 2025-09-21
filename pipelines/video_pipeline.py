@@ -1,64 +1,30 @@
-"""
-    输入文本 -> 分镜 -> 音频/图片 -> 视频
-"""
-class VideoPipeline:
-    def __init__(self, text_service: TextService, image_service: ImageService, audio_service: AudioService, video_service: VideoService):
-        self.text_service = text_service
-        self.image_service = image_service
-        self.audio_service = audio_service
-        self.video_service = video_service
+import os
+from services.text_service import make_storyboard
+from services.image_service import render_scene
+from services.video_service import stitch_images_to_video
+from utils.file_manager import ensure_dir
 
+def run_pipeline(topic: str, workdir: str = "data/output") -> dict:
+    ensure_dir(workdir)
 
-    def run(self, task_id: int, text: str) -> Dict[str, Any]:
-        logger.info('Pipeline started for task %s', task_id)
-        shots = self.text_service.split_into_shots(text)
-        storyboard = Storyboard(task_id, shots)
+    # 1) 文本 → 分镜
+    sb = make_storyboard(topic, n_shots=4)
 
+    # 2) 为每个镜头生成一张占位图（真实项目这里调用你的图生模型）
+    imgs = []
+    for shot in sb.shots:
+        # mock：用纯色图占位，实际应保存 render_scene 的图片结果
+        path = os.path.join(workdir, f"shot_{shot.idx}.png")
+        if not os.path.exists(path):
+            # 简单占位：生成 640x360 纯色图
+            from PIL import Image, ImageDraw
+            im = Image.new("RGB", (640, 360), (30*shot.idx % 255, 80, 140))
+            d = ImageDraw.Draw(im); d.text((20,20), shot.description, fill=(255,255,255))
+            im.save(path)
+        imgs.append(path)
 
-        # Render images
-        for shot in storyboard.shots:
-            self.image_service.render_shot(task_id, shot)
+    # 3) 合成视频
+    out_video = os.path.join(workdir, f"{topic}_demo.mp4")
+    stitch_images_to_video(imgs, out_video, fps=24, dur=1.2)
 
-
-        # Synthesize narration
-        audio_path = self.audio_service.synthesize_narration(task_id, storyboard.shots)
-
-
-        # Compose final video
-        try:
-            video_path = self.video_service.compose_video(task_id, storyboard.shots, audio_path, fps=1)
-            result_url = video_path.resolve().as_uri()
-            logger.info('Pipeline finished for task %s, result=%s', task_id, result_url)
-            return {'status': 'DONE', 'resultUrl': result_url, 'errorMsg': None}
-        except Exception as e:
-            logger.exception('Pipeline failed for task %s', task_id)
-            return {'status': 'FAILED', 'resultUrl': None, 'errorMsg': str(e)}
-
-class RabbitWorker:
-    def __init__(self, pipeline: VideoPipeline, config: Config):
-        self.pipeline = pipeline
-        self.config = config
-        self.params = pika.URLParameters(self.config.RABBIT_URL)
-        self._stopped = False
-
-
-    def _on_message(self, ch, method, properties, body):
-        logger.info('Worker received message: %s', body)
-        try:
-            payload = json.loads(body.decode('utf-8'))
-        except Exception as e:
-            logger.exception('Invalid JSON payload: %s', e)
-            ch.basic_ack(delivery_tag=method.delivery_tag)
-            return
-
-
-        task_id = payload.get('taskId') or int(time.time())
-        text = payload.get('text') or self._fetch_text_from_backend(task_id) or ''
-
-
-        try:
-            result = self.pipeline.run(task_id, text)
-            # 回调 Java 后端
-            callback_url = f"{self.config.CALLBACK_BASE}/api/task/callback/{task_id}"
-            try:
-                headers = {'Content-Type': 'application/json'}n
+    return {"title": sb.title, "shots": [s.model_dump() for s in sb.shots], "video": out_video, "images": imgs}
