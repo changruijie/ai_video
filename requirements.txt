@@ -10,3 +10,10 @@ pillow>=10.0.0
 loguru==0.7.2
 python-dotenv==1.0.1
 pydantic-settings==2.2.1
+
+# 阿里 DashScope（万相/通义）
+dashscope==1.19.0     # 版本号可按你本地环境微调
+
+# （可选）阿里语音合成 NLS SDK；如不使用，可先不安装
+aliyun-python-sdk-core==2.13.36
+aliyun-python-sdk-nls==1.0.0
